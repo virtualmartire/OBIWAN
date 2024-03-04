@@ -1,0 +1,14 @@
+.DS_Store
+__pycache__
+.ipynb_checkpoints
+
+container/image.sif
+
+data/datasets/ani1x/*
+data/datasets/ani2x/*
+data/datasets/comp6v2/*
+data/datasets/spice/*
+
+figure-paper
+
+!**/README.md

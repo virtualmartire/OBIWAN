@@ -1,0 +1,93 @@
+Composition = chemical formula
+Configuration = relative position of the atoms in a molecule and bonds involved
+Conformation = 3D structure (i.e. coordinates)
+
+#
+##
+### ANI-1X
+##
+#
+
+Source: https://springernature.figshare.com/collections/The_ANI-1ccx_and_ANI-1x_data_sets_coupled-cluster_and_density_functional_theory_properties_for_molecules/4712477
+
+Species: H, C, N, O.
+
+Num. compositions: 3_114
+Num. configurations: 63_865
+Num. conformations: 4_956_005
+
+Units: Angstroms (Coordinates), Hartrees (Energies), Hartrees/Angstroms (Forces)
+Data dtype: float32
+DFT functional: wb97x
+Basis set: 6-31g*
+
+Size (num. atoms) of the biggest molecule: 63
+max_num_pairs = 53          (radial_cutoff=5.2)
+max_num_triplets = 496      (angular_cutoff=3.5)
+min. energy: -3306.5849609375
+
+#
+##
+### ANI-2X
+##
+#
+
+Source: //
+
+Species: H, C, N, O, F, S, Cl.
+
+Num. compositions: 13_382
+Num. configurations: 13_405
+Num. conformations: 4_695_707
+
+Units: Angstroms (Coordinates), Hartrees (Energies), Hartrees/Angstroms (Forces)
+Data dtype: float32
+DFT functional: wb97x
+Basis set: 6-31g*
+
+Size (num. atoms) of the biggest molecule: 56
+max_num_pairs =  52         (radial_cutoff=5.2)
+max_num_triplets = 435      (angular_cutoff=3.5)
+min. energy: -3306.5849609375
+
+#
+##
+### COMP6v2
+##
+#
+
+Source: //
+
+Species: H, C, N, O, F, S, Cl.
+
+Num. compositions: 480
+Num. configurations: 8247
+Num. conformations: 157_728
+
+Units: Angstroms (Coordinates), Hartrees (Energies), Hartrees/Angstroms (Forces)
+Data dtype: float32
+DFT functional: wb97x
+Basis set: 6-31g*
+
+Size (num. atoms) of the biggest molecule: 312
+
+#
+##
+### SPICE 1.1.4, PubChem subset (filtered retaining only neutral atoms)
+##
+#
+
+Source: https://github.com/openmm/spice-dataset
+
+Species: H, C, N, O, F, P, S, Cl.
+
+Num. compositions: ?
+Num. configurations: 11_770
+Num. conformations: 569_542
+
+Units: Bohr (Coordinates), Hartrees (Energies), Hartrees/Bohr (Forces)
+Data dtype: float32
+DFT functional: wB97M-D3(BJ)
+Basis set: def2-TZVPPD
+
+Size (num. atoms) of the biggest molecule: 50
