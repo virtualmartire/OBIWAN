@@ -9,6 +9,4 @@ data/datasets/ani2x/*
 data/datasets/comp6v2/*
 data/datasets/spice/*
 
-figure-paper
-
 !**/README.md
