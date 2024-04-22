@@ -3,10 +3,9 @@ import tensorflow as tf
 import h5py
 from rdkit import Chem
 import os
-import pandas as pd
+import torch
 
 import data.pyanitools as pya
-from architectures.net_utils import hartree2kcalmol
 
 
 #
@@ -248,6 +247,8 @@ def COMP6v2Yielder(path):
     for conformation, energy, species_ in zip(coordinates, energies, species):
       yield (conformation, species_), energy
 
+  anidataloader_object.cleanup()
+
 
 def getBatchedDataset(ds_path, batch_size, data_dtype=tf.float32):
 
@@ -273,39 +274,52 @@ def getBatchedDataset(ds_path, batch_size, data_dtype=tf.float32):
   return dataset
 
 
-def OneTestOnCOMP6v2(ds_path, model, print_error=False, batch_size=64):
+def OBITestOnCOMP6v2(ds_path, model, batch_size=64):
 
-  ds_name = "-".join(ds_path.split("/")[-1].split(".")[0].split("-")[0:2])
+  @tf.function
+  def compiledCall(inputs):
+    return model(inputs)
 
   # Get the test set
   tf_dataset = getBatchedDataset(ds_path=ds_path, batch_size=batch_size)
 
-  # Compute the predictions
-  predictions_array = model.predict(tf_dataset, verbose=0)
+  # Predict
+  predictions_array = np.array([])
+  labels_array = np.array([])
+  for inputs_batch, energies_batch in tf_dataset:
+    predictions = compiledCall(inputs_batch)
+    predictions_array = np.concatenate([predictions_array, predictions.numpy().flatten()])
+    labels_array = np.concatenate([labels_array, energies_batch.numpy().flatten()])
 
-  # Get the labels
-  labels_array = np.array(
-                          list( 
-                                  tf_dataset.unbatch()
-                                  .map(lambda x, y: y)
-                                  .as_numpy_iterator()
-                              )
-                          )
+  # Compute the squared errors
+  squared_errors = (predictions_array - labels_array)**2
 
-  # Compute the RMSE
-  rmse = np.sqrt(np.mean( (predictions_array - labels_array)**2 ))
-
-  # Convert to kcal/mol
-  rmse = hartree2kcalmol(rmse)
-
-  if print_error:
-    print(f"kcalmolRMSE on {ds_name}: {rmse}")
-
-  return rmse
+  return squared_errors.tolist()
 
 
-def addRowToCSV(df_path, errors_dict, checkpoint_name):
-  df = pd.read_csv(df_path)
-  errors_dict['model'] = checkpoint_name
-  df = pd.concat([df, pd.DataFrame([errors_dict])], ignore_index=True)
-  df.to_csv(df_path, index=False)
+def ANITestOnCOMP6v2(ds_path, model):
+
+  anidataloader_object = pya.anidataloader(ds_path)
+  predictions_array = np.array([])
+  labels_array = np.array([])
+
+  for molecule_configuration in anidataloader_object:
+
+    atomic_numbers_batch = molecule_configuration['species']
+    atomic_numbers_batch = torch.from_numpy(atomic_numbers_batch)
+
+    coordinates_batch = molecule_configuration['coordinates']
+    coordinates_batch = torch.from_numpy(coordinates_batch)
+
+    energies_batch = molecule_configuration['energies']
+    energies_batch = torch.from_numpy(energies_batch)
+
+    predictions = model((atomic_numbers_batch, coordinates_batch)).energies.detach()
+    predictions_array = np.concatenate([predictions_array, predictions.numpy().flatten()])
+    labels_array = np.concatenate([labels_array, energies_batch.numpy().flatten()])
+
+  squared_errors = (predictions_array - labels_array)**2
+
+  anidataloader_object.cleanup()
+
+  return squared_errors.tolist()

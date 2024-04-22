@@ -22,7 +22,7 @@ class RadialAEVComputer(tf.keras.layers.Layer):
 
       self.vocabulary = range(1, len(vocabulary)+1)
       
-      self.Rcr = tf.constant(radial_AEV_params["Rcr"], dtype=self.dtype)
+      self.cutoff = tf.constant(radial_AEV_params["Rcr"], dtype=self.dtype)
       self.EtaR = tf.constant(radial_AEV_params["EtaR"], dtype=self.dtype)
       self.ShfR = tf.constant(radial_AEV_params["ShfR"], dtype=self.dtype)
 
@@ -47,14 +47,14 @@ class RadialAEVComputer(tf.keras.layers.Layer):
       """The original ANAKIN cutoff function."""
       return 0.5 * tf.math.cos(math.pi * distance / Rc) + 0.5     # Assuming all elements in distances are smaller than cutoff
 
-   def GRFormula(self, interesting_distances, pairs_params_r):
+   def computeGRTerms(self, interesting_distances, pairs_params_r):
       """The ANAKIN AEV radial term."""
 
       R_ij = tf.expand_dims(interesting_distances, 0)
       pairs_params_r = tf.expand_dims(pairs_params_r, 1)
       EtaR, ShfR = tf.unstack(pairs_params_r, axis=-1)
 
-      return tf.math.exp(-EtaR * (R_ij - ShfR)**2) * self.f_C(R_ij, self.Rcr)
+      return tf.math.exp(-EtaR * (R_ij - ShfR)**2) * self.f_C(R_ij, self.cutoff)
    
    @staticmethod
    def intAndSort(boolean_mask):
@@ -74,7 +74,7 @@ class RadialAEVComputer(tf.keras.layers.Layer):
 
       indices = self.getShiftedIndices(boolean_mask)
       fake_ragged_dim_length = tf.reduce_max( tf.reduce_sum(tf.cast(boolean_mask, tf.int32), axis=-1) )
-      all_zero = tf.zeros(shape=(tf.shape(boolean_mask)[0], tf.shape(boolean_mask)[1], fake_ragged_dim_length, tf.shape(interesting_elements)[-1]), dtype=self.dtype)
+      all_zero = tf.zeros(shape=(tf.shape(boolean_mask)[0], tf.shape(boolean_mask)[1], fake_ragged_dim_length, len(self.vocabulary), tf.shape(interesting_elements)[-1]), dtype=self.dtype)
 
       fake_ragged_tensor = tf.tensor_scatter_nd_add(all_zero, indices, interesting_elements)
 
@@ -87,29 +87,32 @@ class RadialAEVComputer(tf.keras.layers.Layer):
       interesting_species = tf.expand_dims(num_species_batch, axis=1)
       interesting_species = tf.tile(interesting_species, multiples=[1, num_atoms, 1])
       interesting_species = tf.boolean_mask(interesting_species, cutoff_mask)
-      interesting_species = tf.expand_dims(interesting_species, axis=-1)         # in order to use createFakeRaggedTensor
-      GR_addends_species = self.createFakeRaggedTensor(interesting_species, cutoff_mask)
 
-      return GR_addends_species
+      return interesting_species
 
-   def call(self, distance_matrices, num_species_batch):
-      
+   def call(self, distance_matrices_batch, num_species_batch):
+
       # 1. Compute and apply the cutoff mask
-      cutoff_mask = (distance_matrices < self.Rcr) & (distance_matrices != 0.)
-      interesting_distances = tf.boolean_mask(distance_matrices, cutoff_mask)
+      cutoff_mask = (distance_matrices_batch < self.cutoff) & (distance_matrices_batch != 0.)      # != 0. to exclude dummy atoms, that are all in the same place
+      interesting_distances = tf.boolean_mask(distance_matrices_batch, cutoff_mask)
+      interesting_species = self.tailorSpeciesBatch(num_species_batch, cutoff_mask)
 
       # 2. Compute the GR addends
-      interesting_GR_addends = self.GRFormula(interesting_distances, self.pairs_params_r)
+      interesting_GR_addends = self.computeGRTerms(interesting_distances, self.pairs_params_r)
       interesting_GR_addends = tf.transpose(interesting_GR_addends)
 
       # 3. Reconstruct the (minimal) shape and sum for the output
-      GR_addends_species = self.tailorSpeciesBatch(num_species_batch, cutoff_mask)
-      GR_addends = self.createFakeRaggedTensor(interesting_GR_addends, cutoff_mask)          # (batch_size, num_atoms, fake_ragged_dim_length, num_pairs_params_r)
-      GR_addends = tf.concat([
-                        GR_addends * tf.cast(GR_addends_species==X, GR_addends.dtype)
-                        for X in self.vocabulary
-                        ], axis=-1)
-      GR_batch = tf.reduce_sum(GR_addends, axis=-2)      # reduce_sum at the end for perfomance purposes
+      interesting_species_one_hot = tf.one_hot(
+                                          tf.cast(interesting_species, tf.int32)-1,    # -1 to one-hot H in the first component
+                                          len(self.vocabulary)
+                                       )
+      interesting_species_one_hot = tf.expand_dims(interesting_species_one_hot, axis=-1)
+      interesting_GR_addends = tf.expand_dims(interesting_GR_addends, axis=1)
+      interesting_GR_addends = tf.tile(interesting_GR_addends, multiples=[1, len(self.vocabulary), 1])
+      GR_addends = interesting_GR_addends * tf.cast(interesting_species_one_hot, interesting_GR_addends.dtype)
+      GR_addends = self.createFakeRaggedTensor(GR_addends, cutoff_mask)          # (batch_size, num_atoms, fake_ragged_dim_length, vocabulary_length, num_pairs_params_r)
+      GR_batch = tf.reduce_sum(GR_addends, axis=2)
+      GR_batch = tf.reshape(GR_batch, [tf.shape(GR_batch)[0], tf.shape(GR_batch)[1], -1])
 
       return GR_batch
 
@@ -119,7 +122,6 @@ class AngularAEVComputer(tf.keras.layers.Layer):
    def __init__(self,
                   vocabulary,
                   angular_AEV_params,
-                  max_molecule_size
                ):
       super(AngularAEVComputer, self).__init__(name="angular_aev_computer")
 
@@ -129,7 +131,7 @@ class AngularAEVComputer(tf.keras.layers.Layer):
          for y in range(1, num_elements+1)[i:]:
             self.pairs_vocabulary.append([x, y])
 
-      self.Rca = tf.constant(angular_AEV_params["Rca"], dtype=self.dtype)
+      self.cutoff = tf.constant(angular_AEV_params["Rca"], dtype=self.dtype)
       self.Zeta = tf.constant(angular_AEV_params["Zeta"], dtype=self.dtype)
       self.ShfZ = tf.constant(angular_AEV_params["ShfZ"], dtype=self.dtype)
       self.EtaA = tf.constant(angular_AEV_params["EtaA"], dtype=self.dtype)
@@ -137,10 +139,6 @@ class AngularAEVComputer(tf.keras.layers.Layer):
 
       self.quadruplets_params_a = self.quadrupleCartProd(self.Zeta, self.ShfZ, self.EtaA, self.ShfA)
       self.num_quadruplets_params_a = tf.shape(self.quadruplets_params_a)[0]
-
-      self.precomputed_triplets = self.computeInterestingTriplets(max_molecule_size)
-      self.precomputed_pairs = tf.vectorized_map(fn = lambda x: tf.map_fn(self.computePairs, x),
-                                                   elems = self.precomputed_triplets)
 
       self.num_pairs = len(self.pairs_vocabulary)
 
@@ -174,82 +172,6 @@ class AngularAEVComputer(tf.keras.layers.Layer):
       return cart
 
    @staticmethod
-   def computeInterestingTriplets(max_molecule_size):
-      """Computes the indices of all the interesting triplets of atoms given the number of atoms in the molecule.
-      (`interesting` for the subsequent angles' construction, i.e. without repetition).
-      
-      This computation is done only one time at the beginning of the session for the biggest molecule of the experiment. All the triplets
-      for molecules of other sizes are sliced from the aforesaid big tensor."""
-      
-      def getPartialCombinations(objects_array):
-         
-         pairs = tf.meshgrid(objects_array, objects_array)
-         pairs = tf.transpose(pairs)
-         pairs = tf.reshape(pairs, shape=[-1,2])
-
-         column_1, column_2 = tf.unstack(pairs, axis=1)
-         interesting_pairs = tf.boolean_mask(pairs, column_1 < column_2)
-
-         return interesting_pairs
-
-      # First of all compute the triplets
-
-      atoms_indexes = tf.range(max_molecule_size, dtype=tf.int64)
-
-      atoms_indexes_ = tf.expand_dims(atoms_indexes, 0)
-      atoms_indexes_ = tf.repeat(atoms_indexes_, max_molecule_size, axis=0)
-      non_diagonal_selector = tf.ones([max_molecule_size, max_molecule_size]) - tf.eye(max_molecule_size)
-      atoms_indexes_ = tf.boolean_mask(atoms_indexes_, non_diagonal_selector)
-      atoms_indexes_ = tf.reshape(atoms_indexes_, shape=[max_molecule_size, max_molecule_size-1])
-
-      interesting_pairs = tf.map_fn(getPartialCombinations, atoms_indexes_)
-
-      num_triplets = (max_molecule_size-1)*((max_molecule_size-1)-1)//2
-      atoms_indexes = tf.expand_dims(tf.reshape(tf.repeat(atoms_indexes, num_triplets),
-                                                shape=[max_molecule_size, num_triplets]),
-                                    -1)
-      interesting_triplets = tf.concat([atoms_indexes, interesting_pairs], -1)
-
-      # And then reorder the triplets in order to fetch them with ease
-
-      max_triplets_per_atom = tf.shape(interesting_triplets)[1]
-      current_triplets_per_atom = ((max_molecule_size)-1) * ((max_molecule_size)-2) // 2
-      indices = tf.stack([tf.range(max_triplets_per_atom),
-                           tf.repeat([2], repeats=max_triplets_per_atom)],
-                           axis=-1)
-      matrix = tf.squeeze(tf.gather(interesting_triplets, [0]))
-      last_coeff = tf.gather_nd(indices=indices, params=matrix)
-      sorted_last_coeff = tf.argsort(last_coeff)
-      selected_indices = tf.gather(sorted_last_coeff, tf.range(current_triplets_per_atom))
-      second_indices = tf.repeat(tf.expand_dims(selected_indices, axis=0),
-                                 repeats=max_molecule_size,
-                                 axis=0)
-      second_indices = tf.reshape(second_indices, [-1])
-      first_indices = tf.repeat(tf.range(max_molecule_size), repeats=current_triplets_per_atom)
-      indices = tf.stack([first_indices, second_indices], axis=1)
-      output = tf.gather_nd(params=interesting_triplets, indices=indices)
-      output = tf.reshape(output, [max_molecule_size, current_triplets_per_atom, 3])
-
-      return output
-
-   @staticmethod
-   def computePairs(triplet_indexes):
-      """Given three triplet's indices, compute all the 3 possible pairs."""
-      pairs = tf.meshgrid(triplet_indexes, triplet_indexes)
-      pairs = tf.transpose(pairs)
-      pairs = tf.reshape(pairs, shape=[-1,2])
-
-      return tf.gather(pairs, [1, 2, 5])
-
-   def getInterestingTriplets(self, current_molecule_size):
-      current_triplets_per_atom = ((current_molecule_size)-1) * ((current_molecule_size)-2) // 2
-      return tf.slice(self.precomputed_triplets, [0, 0, 0], [current_molecule_size, current_triplets_per_atom, 3])
-
-   def getPairs(self, current_molecule_size):
-      current_triplets_per_atom = ((current_molecule_size)-1) * ((current_molecule_size)-2) // 2
-      return tf.slice(self.precomputed_pairs, [0, 0, 0, 0], [current_molecule_size, current_triplets_per_atom, 3, 2])
-
-   @staticmethod
    def carnotTheorem(distances):
       """Implementation of the so called Carnot Formula in order to compute angles from distances (which we already have!)."""
 
@@ -264,7 +186,7 @@ class AngularAEVComputer(tf.keras.layers.Layer):
       """The original ANAKIN cutoff function."""
       return 0.5 * tf.math.cos(math.pi * distance / Rc) + 0.5     # Assuming all elements in distances are smaller than cutoff
 
-   def GAFormula(self, interesting_geometries, quadruplets_params_a):
+   def computeGATerms(self, interesting_geometries, quadruplets_params_a):
          """The ANAKIN AEV angular term."""
          
          interesting_geometries = tf.expand_dims(interesting_geometries, 0)
@@ -274,7 +196,7 @@ class AngularAEVComputer(tf.keras.layers.Layer):
 
          factor_1 = ( (1 + tf.math.cos(angle - ShfZ)) / 2 ) ** Zeta
          factor_2 = tf.math.exp( -EtaA * ( (R_ij+R_ik)/2 - ShfA )**2 )
-         GA_addends = 2 * factor_1 * factor_2 * self.f_C(R_ij, self.Rca) * self.f_C(R_ik, self.Rca)
+         GA_addends = 2 * factor_1 * factor_2 * self.f_C(R_ij, self.cutoff) * self.f_C(R_ik, self.cutoff)
 
          return GA_addends
 
@@ -302,41 +224,108 @@ class AngularAEVComputer(tf.keras.layers.Layer):
 
       return fake_ragged_tensor
 
+   @staticmethod
+   def computeSpeciesTripletsIndices(flattened_triplets_indices):
+
+      flattened_species_indices = tf.slice(flattened_triplets_indices, [0, 0, 0], [tf.shape(flattened_triplets_indices)[0], 2, 3])
+      batch_indices, first_indices, second_indices = tf.unstack(flattened_species_indices, axis=-1)
+      flattened_species_indices = tf.stack([batch_indices, second_indices], axis=-1)
+      central_species_indices = tf.stack([batch_indices, first_indices], axis=-1)
+      central_species_indices = tf.slice(central_species_indices, [0, 0, 0], [tf.shape(central_species_indices)[0], 1, 2])
+      flattened_species_indices = tf.concat([central_species_indices, flattened_species_indices], axis=1)
+
+      return flattened_species_indices
+   
+   @staticmethod
+   def computeNeighboursCombinations(num_neighbors):
+
+      objects_array = tf.range(num_neighbors, dtype=tf.int32)
+      pairs = tf.meshgrid(objects_array, objects_array)
+      pairs = tf.transpose(pairs)
+      pairs = tf.reshape(pairs, shape=[-1,2])
+      column_1, column_2 = tf.unstack(pairs, axis=1)
+      interesting_pairs = tf.boolean_mask(pairs, column_1 < column_2)
+
+      return interesting_pairs
+
+   def computeDistancesTripletsIndices(self, cutoff_mask):
+
+      neighbours_count = tf.reduce_sum(tf.cast(cutoff_mask, tf.int32), axis=-1)
+      neighbours_count = tf.reshape(neighbours_count, shape=[-1])
+      index_shifts = tf.cumsum(neighbours_count, exclusive=True)
+
+      max_neighbors = tf.reduce_max(neighbours_count)
+      neighbours_pairs_combinations = self.computeNeighboursCombinations(max_neighbors)
+
+      neighbours_pairs_combinations = tf.tile(neighbours_pairs_combinations, multiples=[tf.shape(neighbours_count)[0], 1])
+      max_triplets = max_neighbors*(max_neighbors-1)//2
+      neighbours_pairs_combinations = tf.reshape(neighbours_pairs_combinations, shape=[-1, max_triplets, 2])
+
+      permutations_mask = tf.reshape(neighbours_count, [-1, 1, 1])
+      permutations_mask = tf.tile(permutations_mask, multiples=[1, max_triplets, 2])
+      permutations_mask = neighbours_pairs_combinations < permutations_mask
+      permutations_mask = tf.reduce_all(permutations_mask, axis=-1)
+
+      neighbours_pairs_combinations = tf.gather_nd(neighbours_pairs_combinations, tf.where(permutations_mask))
+      neighbours_pairs_combinations += tf.expand_dims(tf.repeat(index_shifts, (neighbours_count*(neighbours_count-1)//2)), axis=-1)
+
+      inside_cutoff_indices = tf.where(cutoff_mask)
+      flattened_triplets_indices = tf.gather(inside_cutoff_indices, neighbours_pairs_combinations)
+
+      j_indices, k_indices = tf.unstack(flattened_triplets_indices, axis=1)
+      flipped_k_indices = tf.reverse(k_indices, axis=[1])
+
+      messy_indices = tf.concat([j_indices, flipped_k_indices], axis=-1)
+      jk_indices = tf.slice(messy_indices, [0, 2], [tf.shape(messy_indices)[0], 2])
+
+      batch_indices = tf.slice(messy_indices, [0, 0], [tf.shape(messy_indices)[0], 1])
+
+      jk_indices = tf.concat([batch_indices, jk_indices], axis=-1)
+
+      jk_indices = tf.expand_dims(jk_indices, axis=1)
+      flattened_triplets_indices = tf.concat([flattened_triplets_indices, jk_indices], axis=1)
+
+      return flattened_triplets_indices, neighbours_count
+
    def call(self, distance_matrices, num_species_batch):
 
       # 1. Set some environment variables
-      num_atoms = tf.shape(num_species_batch)[1]
       batch_size = tf.shape(num_species_batch)[0]
+      num_atoms = tf.shape(num_species_batch)[1]
 
-      # 2. Get the distances' and species' triplets
-      distance_indices = tf.tile(tf.expand_dims(self.getPairs(num_atoms), axis=0),
-                                 multiples=[batch_size, 1, 1, 1, 1])
-      triplets_distances = tf.gather_nd(params=distance_matrices, indices=distance_indices, batch_dims=1)   # we need all the three distances in order to compute the angles
-      species_indices = tf.tile(tf.expand_dims(self.getInterestingTriplets(num_atoms), axis=0),
-                                 multiples=[batch_size, 1, 1, 1])
-      triplets_species = tf.gather(params=num_species_batch, indices=species_indices, batch_dims=1)
+      # 2. Get the distances' triplets
+      cutoff_mask = (distance_matrices < self.cutoff) & (distance_matrices != 0.)
+      flattened_triplets_indices, neighbours_count = self.computeDistancesTripletsIndices(cutoff_mask)
+      interesting_triplets_distances = tf.gather_nd(distance_matrices, flattened_triplets_indices)   # (batch_size*num_atoms*interesting_triplets, 3)
 
-      # 3. Compute and apply the cutoff mask
-      cutoff_mask = tf.reduce_all(triplets_distances < [self.Rca, self.Rca, 1e20], axis=-1) & tf.reduce_all(triplets_distances != [0., 0., 0.], axis=-1)
-      interesting_distances = tf.boolean_mask(triplets_distances, cutoff_mask)
-      interesting_species = tf.boolean_mask(triplets_species, cutoff_mask)
+      # 3. Get the species' triplets
+      flattened_species_indices = self.computeSpeciesTripletsIndices(flattened_triplets_indices)
+      interesting_triplets_species = tf.gather_nd(num_species_batch, flattened_species_indices)      # (batch_size*num_atoms*interesting_triplets, 3)
 
       # 4. Compute the GA addends
-      interesting_geometries = self.carnotTheorem(interesting_distances)
-      interesting_GA_addends = self.GAFormula(interesting_geometries, self.quadruplets_params_a)
-      interesting_GA_addends = tf.transpose(interesting_GA_addends)
+      interesting_geometries = self.carnotTheorem(interesting_triplets_distances)
+      interesting_GA_addends = self.computeGATerms(interesting_geometries, self.quadruplets_params_a)
+      interesting_GA_addends = tf.transpose(interesting_GA_addends)                                            # (batch_size*num_atoms*interesting_triplets, num_quadruplets_params_a)
 
       # 5. Reconstruct the (minimal) shape and sum for the output
-      GA_addends = self.createFakeRaggedTensor(interesting_GA_addends, cutoff_mask)             # (batch_size, num_atoms, fake_ragged_dim_length, num_quadruplets_params_a)
-      interesting_species_jk = tf.slice(interesting_species, begin=[0, 1], size=[-1, 2])
-      GA_addends_species_jk = self.createFakeRaggedTensor(interesting_species_jk, cutoff_mask)  # (batch_size, num_atoms, fake_ragged_dim_length, 2)
-      GA_addends = tf.concat([
-                        GA_addends * tf.cast(
-                                          tf.reduce_all(GA_addends_species_jk==tf.cast(XY, self.dtype), axis=-1, keepdims=True) | tf.reduce_all(GA_addends_species_jk==tf.reverse(tf.cast(XY, self.dtype), [-1]), axis=-1, keepdims=True),
-                                       GA_addends.dtype)
-                        for XY in self.pairs_vocabulary
-                        ], axis=-1)
-      GA_batch = tf.reduce_sum(GA_addends, axis=-2)      # reduce_sum at the end for perfomance purposes
+      interesting_species_jk = tf.slice(interesting_triplets_species, begin=[0, 1], size=[-1, 2])                # (batch_size*num_atoms*interesting_triplets, 2)
+      interesting_species_jk = tf.expand_dims(interesting_species_jk, axis=1)
+      interesting_species_jk = tf.tile(interesting_species_jk, multiples=[1, len(self.pairs_vocabulary), 1])     # (batch_size*num_atoms*interesting_triplets, num_pairs_voc, 2)
+      pairs_vocabulary_tensor = tf.constant(self.pairs_vocabulary, dtype=interesting_species_jk.dtype)
+      interesting_species_one_hot = tf.reduce_all(
+                                          interesting_species_jk==pairs_vocabulary_tensor, axis=-1
+                                          ) | tf.reduce_all(
+                                                   interesting_species_jk==tf.reverse(pairs_vocabulary_tensor, [-1]), axis=-1
+                                                   )                                                             # (batch_size*num_atoms*interesting_triplets, num_pairs_voc)
+      indices_for_sum = tf.where(interesting_species_one_hot)
+      indices_for_sum = tf.slice(indices_for_sum, [0, 1], [-1, 1])
+      GA_batch = tf.zeros((batch_size*num_atoms, len(self.pairs_vocabulary), self.num_quadruplets_params_a))
+      batch_indices_for_sum = tf.range(batch_size*num_atoms, dtype=indices_for_sum.dtype)
+      triplets_count = neighbours_count * (neighbours_count-1) // 2
+      batch_indices_for_sum = tf.repeat(batch_indices_for_sum, triplets_count, axis=0)
+      indices_for_sum = tf.concat([tf.expand_dims(batch_indices_for_sum, axis=1), indices_for_sum], axis=1)
+      GA_batch = tf.tensor_scatter_nd_add(GA_batch, indices_for_sum, interesting_GA_addends)
+      GA_batch = tf.reshape(GA_batch, [batch_size, num_atoms, -1])
 
       return GA_batch
 
@@ -346,15 +335,39 @@ class AngularAEVComputer(tf.keras.layers.Layer):
 ##
 #
 
+class PBCCoordToDist(tf.keras.layers.Layer):
+
+   def __init__(self):
+      super(PBCCoordToDist, self).__init__()
+
+   def call(self, coordinates_batch, box_sizes):
+
+      t1 = tf.expand_dims(coordinates_batch, axis=1)
+      t2 = tf.expand_dims(coordinates_batch, axis=2)
+
+      per_dim_absolute_differences = tf.abs( t1-t2 )
+      per_dim_actual_differences = tf.math.minimum(per_dim_absolute_differences, box_sizes-per_dim_absolute_differences)
+
+      distances = tf.sqrt( tf.reduce_sum(per_dim_actual_differences**2, axis=-1) )
+
+      return distances
+
 class CoordToDist(tf.keras.layers.Layer):
 
    def __init__(self):
       super(CoordToDist, self).__init__()
 
-   def call(self, coordinates_batch):
+   @staticmethod
+   def call(coordinates_batch):
+
       t1 = tf.expand_dims(coordinates_batch, axis=1)
       t2 = tf.expand_dims(coordinates_batch, axis=2)
-      return tf.norm(t1 - t2, ord = 'euclidean', axis = 3)
+
+      per_dim_absolute_differences = tf.abs( t1-t2 )
+
+      distances = tf.sqrt( tf.reduce_sum(per_dim_absolute_differences**2, axis=-1) )
+      
+      return distances
 
 class CELU(tf.keras.layers.Layer):
    
@@ -363,7 +376,8 @@ class CELU(tf.keras.layers.Layer):
       self.alpha = alpha
 
    def call(self, x):
-      safe_x = tf.where(x>0., 0., x)      # due to a TensorFlow bug
+      zero = tf.constant(0., dtype=x.dtype)
+      safe_x = tf.where(x>zero, zero, x)      # due to a TensorFlow bug
       return tf.where(x>0., x, self.alpha * (tf.math.exp(safe_x/self.alpha) - 1))
 
 #
@@ -374,8 +388,12 @@ class CELU(tf.keras.layers.Layer):
 
 class Anakin(tf.keras.Model):
 
-   def __init__(self, max_molecule_size):
+   def __init__(self,
+                  dynamic_mode = False,
+                  weights = None,
+               ):
       super(Anakin, self).__init__(name="anakin")
+      """Space units = Angstroms. Energy units = Hartree."""
 
       # torchani-2x hyperparameters
       radial_AEV_params = {
@@ -395,28 +413,37 @@ class Anakin(tf.keras.Model):
       self_energies_list = [-0.5978583943827134, -38.08933878049795, -54.711968298621066, -75.19106774742086,
                               -99.80348506781634, -398.1577125334925, -460.1681939421027]      # torchani-2x self-energies (matched with the vocabulary)
 
-      # Input manipulators
-      self.distances_computer = CoordToDist()
-      self.species_translator = tf.keras.layers.StringLookup(vocabulary=vocabulary, output_mode='int', mask_token='', num_oov_indices=0)
+      # Self energies
+      self.self_energies = tf.constant(self_energies_list)
 
       # AEV computers
       self.radial_aev_computer = RadialAEVComputer(vocabulary, radial_AEV_params)
-      self.angular_aev_computer = AngularAEVComputer(vocabulary, angular_AEV_params, max_molecule_size)
+      self.angular_aev_computer = AngularAEVComputer(vocabulary, angular_AEV_params)
 
-      # Energy MLPs
+      # torchani-2x MLPs architectures (matched with the vocabulary)
       radial_aev_lenght = len(vocabulary) * len(radial_AEV_params['EtaR'])*len(radial_AEV_params['ShfR'])
       angular_aev_lenght = len(vocabulary)*(len(vocabulary)+1)/2 * len(angular_AEV_params['Zeta'])*len(angular_AEV_params['ShfZ'])*len(angular_AEV_params['EtaA'])*len(angular_AEV_params['ShfA'])
       self.aev_lenght = int(radial_aev_lenght + angular_aev_lenght)
-      self.networks = [self.getMLP([256, 192, 160]),
-                        self.getMLP([224, 192, 160]),
-                        self.getMLP([192, 160, 128]),
-                        self.getMLP([192, 160, 128]),
-                        self.getMLP([160, 128, 96]),
-                        self.getMLP([160, 128, 96]),
-                        self.getMLP([160, 128, 96])]   # torchani-2x MLPs architectures (matched with the vocabulary)
+      self.H_network = self.getMLP([256, 192, 160])
+      self.C_network = self.getMLP([224, 192, 160])
+      self.N_network = self.getMLP([192, 160, 128])
+      self.O_network = self.getMLP([192, 160, 128])
+      self.F_network = self.getMLP([160, 128, 96])
+      self.S_network = self.getMLP([160, 128, 96])
+      self.Cl_network = self.getMLP([160, 128, 96])
 
-      # Self energies
-      self.self_energies = tf.constant(self_energies_list)
+      if dynamic_mode:     # dynamic mode = PBC in a box; atomic numbers as input; no dummy atoms (=> custom __call__)
+         self.distances_computer = PBCCoordToDist()
+         self.species_translator = tf.keras.layers.StringLookup(vocabulary=vocabulary, output_mode='int', mask_token='', num_oov_indices=0)
+         self.call = self.computeEnergyForDynamics
+      else:
+         self.distances_computer = CoordToDist()
+         self.species_translator = tf.keras.layers.StringLookup(vocabulary=vocabulary, output_mode='int', mask_token='', num_oov_indices=0)
+         self.call = self.computeEnergy
+
+      # Load the weights if provided
+      if weights is not None:
+         self.loadWeights(weights, dynamic_mode)
 
    def getMLP(self, neurons_per_hidden_layer):
 
@@ -432,28 +459,36 @@ class Anakin(tf.keras.Model):
 
       return keras.Model(inputs=inputs, outputs=outputs)
    
-   def loadWeights(self, model_path):
-      self.build( [(None, None, 3), (None, None)] )
+   def loadWeights(self, model_path, dynamic_mode):
+
+      if dynamic_mode:
+         self.build( [(None, None, 3), (None, None), (None, 3)] )
+      else:
+         self.build( [(None, None, 3), (None, None)] )
+
       model_for_weights = tf.keras.models.load_model(model_path)
+      model_for_weights.trainable = True     # in case these weights come from a fine-tuning
       self.set_weights(model_for_weights.get_weights())
 
    def computeMLPEnergies(self, masked_aevs, masked_num_species):
+      """Not optimized, but also not a problem for state-of-the-art parallelization hardware."""
 
-      masked_mlp_energies = tf.zeros_like(masked_num_species, dtype=self.dtype)
+      H_energies = tf.reshape( self.H_network(masked_aevs), [-1] )
+      C_energies = tf.reshape( self.C_network(masked_aevs), [-1] )
+      N_energies = tf.reshape( self.N_network(masked_aevs), [-1] )
+      O_energies = tf.reshape( self.O_network(masked_aevs), [-1] )
+      F_energies = tf.reshape( self.F_network(masked_aevs), [-1] )
+      S_energies = tf.reshape( self.S_network(masked_aevs), [-1] )
+      Cl_energies = tf.reshape( self.Cl_network(masked_aevs), [-1] )
 
-      for i, mlp in enumerate(self.networks):
-         indices = tf.where(masked_num_species == i+1)
-         masked_mlp_energies = tf.cond(pred = tf.shape(indices)[0] > 0,
-                                       true_fn = lambda: tf.tensor_scatter_nd_add(
-                                                                              masked_mlp_energies,
-                                                                              indices, 
-                                                                              tf.reshape( mlp(tf.reshape( tf.gather(masked_aevs, indices), [-1, self.aev_lenght] )), [-1])    # reshape due to indices.shape
-                                                                                 ),
-                                       false_fn = lambda: masked_mlp_energies)
+      stacked_energies = tf.stack([H_energies, C_energies, N_energies, O_energies, F_energies, S_energies, Cl_energies], axis=-1)
+      indices = masked_num_species-1
+      indices = tf.stack([tf.range(tf.shape(indices)[0]), indices], axis=-1)
+      masked_mlp_energies = tf.gather_nd(stacked_energies, indices)
 
       return masked_mlp_energies
 
-   def call(self, inputs):
+   def computeEnergy(self, inputs, training=False):
       """Compute the molecular energies from the input coordinates and species."""
 
       coordinates_batch, string_species_batch = inputs
@@ -471,10 +506,10 @@ class Anakin(tf.keras.Model):
       aevs_batch = tf.concat([rad_aevs_batch, ang_aevs_batch], axis=-1)
 
       # 3. Compute the per-atom self and MLP energies
-      masked_num_species = tf.cast(tf.boolean_mask(num_species_batch, dummy_mask), dtype=tf.int32)    # (nondummy_atoms,)
+      masked_num_species = tf.cast(tf.boolean_mask(num_species_batch, dummy_mask), dtype=tf.int32)    # (num_nondummy_atoms,)
       masked_aevs = tf.boolean_mask(aevs_batch, dummy_mask)
-      masked_mlp_energies = self.computeMLPEnergies(masked_aevs, masked_num_species)
-      masked_self_energies = tf.gather(self.self_energies, masked_num_species-1)
+      masked_self_energies = tf.gather(self.self_energies, masked_num_species-1)          # -1 to have H 0-indexed
+      masked_mlp_energies = self.computeMLPEnergies(masked_aevs, masked_num_species)      # (num_nondummy_atoms,)
 
       # 4. Reconstruct the shape and sum to obtain the molecular energies
       masked_complete_atomic_energies = masked_self_energies + masked_mlp_energies
@@ -483,3 +518,43 @@ class Anakin(tf.keras.Model):
       molecular_energies = tf.reduce_sum(complete_atomic_energies, -1)
 
       return molecular_energies
+   
+   def computeEnergyForDynamics(self, inputs, training=False):
+
+      coordinates_batch, string_species_batch, box_sizes = inputs    # it receives string species also in dynamic mode
+      batch_size = tf.shape(coordinates_batch)[0]
+      num_atoms = tf.shape(coordinates_batch)[1]
+
+      # 1. Preprocess the inputs
+      distance_matrices = self.distances_computer(coordinates_batch, box_sizes)
+      num_species_batch = tf.cast(self.species_translator(string_species_batch), dtype=self.dtype)
+
+      # 2. Compute and concatenate the AEVs
+      rad_aevs_batch = self.radial_aev_computer(distance_matrices, num_species_batch)
+      ang_aevs_batch = self.angular_aev_computer(distance_matrices, num_species_batch)
+      aevs_batch = tf.concat([rad_aevs_batch, ang_aevs_batch], axis=-1)
+
+      # 3. Compute the per-atom self and MLP energies
+      flattened_aevs = tf.reshape(aevs_batch, [batch_size*num_atoms, -1])
+      flattened_num_species = tf.cast( tf.reshape(num_species_batch, [-1]), dtype=tf.int32 )
+      flattened_self_energies = tf.gather(self.self_energies, flattened_num_species-1)          # -1 to have H 0-indexed
+      flattened_mlp_energies = self.computeMLPEnergies(flattened_aevs, flattened_num_species)   # (num_nondummy_atoms,)
+
+      # 4. Reconstruct the shape and sum to obtain the molecular energies
+      flattened_complete_atomic_energies = flattened_self_energies + flattened_mlp_energies
+      complete_atomic_energies = tf.reshape(flattened_complete_atomic_energies, [batch_size, num_atoms])
+      molecular_energies = tf.reduce_sum(complete_atomic_energies)
+
+      return molecular_energies
+
+   def computeEnergyAndForces(self, inputs):
+      """Computation is done in batches."""
+
+      coords = inputs[0]
+
+      with tf.GradientTape(watch_accessed_variables=False) as force_tape:
+         force_tape.watch(coords)
+         energy = self.call(inputs)    # energies computed for free
+      forces = -force_tape.gradient(energy, coords)
+
+      return energy, forces

@@ -102,16 +102,16 @@ def is_not_toxic(model, x, y):
 
     return tf.math.logical_not(any_nan)
 
-def getModel(model_name, max_molecule_size=63):
+def getModel(model_name, **kwargs):
     if model_name == "anakin":
-        return anakin.Anakin(max_molecule_size=max_molecule_size)
+        return anakin.Anakin(**kwargs)
     elif model_name == "w_anakin":
-        return w_anakin.WAnakin(max_molecule_size=max_molecule_size)
+        return w_anakin.WAnakin(**kwargs)
     elif model_name == "w_anakin_oe":
-        return w_anakin_oe.WAnakinOE(max_molecule_size=max_molecule_size)
+        return w_anakin_oe.WAnakinOE(**kwargs)
     elif model_name == "w_anakin_oe_full":
-        return w_anakin_oe_full.WAnakinOEFull(max_molecule_size=max_molecule_size)
+        return w_anakin_oe_full.WAnakinOEFull(**kwargs)
     elif model_name == "obiwan":
-        return obiwan.Obiwan(max_molecule_size=max_molecule_size)
+        return obiwan.Obiwan(**kwargs)
     else:
         raise NotImplementedError(f"Model {model_name} not implemented.")

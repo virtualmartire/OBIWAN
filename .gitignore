@@ -9,4 +9,6 @@ data/datasets/ani2x/*
 data/datasets/comp6v2/*
 data/datasets/spice/*
 
+results/MD/outputs/*.xyz
+
 !**/README.md
