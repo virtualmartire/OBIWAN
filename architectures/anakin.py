@@ -488,7 +488,7 @@ class Anakin(tf.keras.Model):
 
       return masked_mlp_energies
 
-   def computeEnergy(self, inputs, training=False):
+   def computeEnergy(self, inputs, training=None, mask=None):
       """Compute the molecular energies from the input coordinates and species."""
 
       coordinates_batch, string_species_batch = inputs
@@ -519,7 +519,7 @@ class Anakin(tf.keras.Model):
 
       return molecular_energies
    
-   def computeEnergyForDynamics(self, inputs, training=False):
+   def computeEnergyForDynamics(self, inputs, training=None, mask=None):
 
       coordinates_batch, string_species_batch, box_sizes = inputs    # it receives string species also in dynamic mode
       batch_size = tf.shape(coordinates_batch)[0]

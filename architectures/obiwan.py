@@ -449,7 +449,7 @@ class Obiwan(tf.keras.Model):
       self.single_mlp.get_layer('single_mlp_dense_0').trainable = False
       self.single_mlp.get_layer('single_mlp_dense_1').trainable = False
 
-   def computeEnergy(self, inputs, training=False):
+   def computeEnergy(self, inputs, training=None, mask=None):
       """IMPORTANT: dummy atoms must be at 'infinity' and with species '' to ensure
       the correct action of the masking mechanisms.
       
@@ -486,7 +486,7 @@ class Obiwan(tf.keras.Model):
 
       return molecular_energies
    
-   def computeEnergyForDynamics(self, inputs, training=False):
+   def computeEnergyForDynamics(self, inputs, training=None, mask=None):
 
       coordinates_batch, atomic_numbers_batch, box_sizes = inputs
       batch_size = tf.shape(coordinates_batch)[0]
