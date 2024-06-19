@@ -79,6 +79,8 @@ def readSDFile(file_name, return_atomic_numbers=True):
     return num_atoms, coords, atomic_numbers, masses
 
 def readXYZ(file_name):
+    """Can also read .forces files."""
+    
     xyz = []
     typ = []
     Na = []
@@ -126,6 +128,7 @@ class Settings():
         self.T = 300.
         self.pdbFileName = "mdTraj.pdb"
         self.xyzFileName = "mdTraj.xyz"
+        self.forcesFileName = "mdForces.forces"
         self.strideSaving = 1000
 
 class System():

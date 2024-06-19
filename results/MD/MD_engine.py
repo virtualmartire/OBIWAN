@@ -10,7 +10,7 @@ import gc
 # langevin (a la gromacs https://manual.gromacs.org/current/reference-manual/algorithms/stochastic-dynamics.html) integration method 
 class MolecularDynamics():    
 
-    def __init__(self, settings, system, chosen_dtype='float32', wrapping=True, use_atomic_numbers=True):
+    def __init__(self, settings, system, chosen_dtype='float32', wrapping=True, save_forces=False, use_atomic_numbers=True):
 
         self.dtype = chosen_dtype
 
@@ -21,9 +21,12 @@ class MolecularDynamics():
         self.setSystem(system)
         self.setSettings(settings)
         self.wrapping = wrapping
+        self.save_forces = save_forces
         self.use_atomic_numbers = use_atomic_numbers
 
-    def setSystem(self,system):
+        self.typeDict = {6:'C',7:'N',1:'H',8:'O',9:'F',17:'Cl',35:'Br',53:'I',16:'S'}
+
+    def setSystem(self, system):
         self.system = system
         self.dim = system.dim
         self.na = tf.shape(system.coords)[0]        # excluding tha batch axis
@@ -72,9 +75,6 @@ class MolecularDynamics():
             self.PDB_FILE.write("CRYST1 %8.3f %8.3f %8.3f  90.00  90.00  90.00\n"%(self.box_sizes[0]*10., self.box_sizes[1]*10., self.box_sizes[2]*10.))
 
     def savePDBFrame(self):
-    
-        # type dict         
-        typeDict = {6:'C',7:'N',1:'H',8:'O',9:'F',17:'Cl',35:'Br',53:'I',16:'S'}        
         
         # transfer data to host mem 
         pos_host = self.pos_wrapped.numpy()
@@ -82,7 +82,7 @@ class MolecularDynamics():
         self.PDB_FILE.write("MODEL\n")     
         stru = ""
         for i in range(0,self.na):
-            type = typeDict[int(self.types[i])]
+            type = self.typeDict[int(self.types[i])]
             # save positions in Angostrom
             stri = "{:6s}{:5d} {:^4s}{:1s}{:3s} {:1s}{:4d}{:1s}   {:8.3f}{:8.3f}{:8.3f}{:6.2f}{:6.2f}\n".format("ATOM",i+1,type,"","XXX","A",1,"",pos_host[i,0]*10., pos_host[i,1]*10., pos_host[i,2]*10.,1.,1.)
             stru = stru+stri
@@ -99,9 +99,6 @@ class MolecularDynamics():
             self.XYZ_FILE = open(self.settings.xyzFileName, "w")
 
     def saveXYZFrame(self):
-    
-        # type dict         
-        typeDict = {6:'C',7:'N',1:'H',8:'O',9:'F',17:'Cl',35:'Br',53:'I',16:'S'}
         
         # transfer data to host mem 
         pos_host = self.pos_wrapped.numpy()
@@ -111,7 +108,7 @@ class MolecularDynamics():
         self.XYZ_FILE.write(f"{self.E_nn}\n")
         for i in range(0, self.na):
             if self.use_atomic_numbers:
-                type = typeDict[int(self.types[i])]
+                type = self.typeDict[int(self.types[i])]
             else:
                 type = self.types[i].numpy().decode('utf-8')
             # save positions in Angostrom
@@ -119,6 +116,30 @@ class MolecularDynamics():
 
     def closeXYZFile(self):
         self.XYZ_FILE.close()
+
+    def openForcesFile(self, append_results):
+        if append_results:
+            self.FORCES_FILE = open(self.settings.forcesFileName, "a")
+        else:
+            self.FORCES_FILE = open(self.settings.forcesFileName, "w")
+
+    def saveForcesFrame(self):
+        
+        # transfer data to host mem 
+        forces_host = self.forces.numpy()
+        
+        # write
+        self.FORCES_FILE.write(f"{self.na}\n")
+        self.FORCES_FILE.write(f"{self.E_nn}\n")
+        for i in range(0, self.na):
+            if self.use_atomic_numbers:
+                type = self.typeDict[int(self.types[i])]
+            else:
+                type = self.types[i].numpy().decode('utf-8')
+            self.FORCES_FILE.write(f"{type} {forces_host[i,0]*10.:.3f} {forces_host[i,1]*10.:.3f} {forces_host[i,2]*10.:.3f}\n")
+
+    def closeForcesFile(self):
+        self.FORCES_FILE.close()
 
     @staticmethod
     def centerSystem(pos):
@@ -158,7 +179,8 @@ class MolecularDynamics():
                 # now moves on the forces direction (gradient ascent)
                 self.pos = self.pos + eta*self.forces
                 max_force = tf.reduce_max(tf.abs(self.forces))
-                print(f"<<INFO>> Minimization: It {it} Potential value {self.E_nn} max force value {max_force}")
+                if it % 1000 == 0:
+                    print(f"<<INFO>> Minimization: It {it} Potential value {self.E_nn} max force value {max_force}")
                 
                 if it % 1000 == 0:
                     # garbage collection
@@ -189,6 +211,8 @@ class MolecularDynamics():
 
         #self.openPDBFile()
         self.openXYZFile(append_results)
+        if self.save_forces:
+            self.openForcesFile(append_results)
 
         print("<<INFO>> Start looping..")
         pbar = tqdm(total=numsteps)
@@ -217,6 +241,8 @@ class MolecularDynamics():
                     self.pos_wrapped = self.pos
                 #self.savePDBFrame()
                 self.saveXYZFrame()
+                if self.save_forces:
+                    self.saveForcesFrame()
 
             if step % 1000 == 0:
                 # garbage collection
@@ -229,6 +255,8 @@ class MolecularDynamics():
         pbar.close()
         #self.closePDBFile()
         self.closeXYZFile()
+        if self.save_forces:
+            self.closeForcesFile()
         
         # print final stats
         endTime = time.perf_counter()
