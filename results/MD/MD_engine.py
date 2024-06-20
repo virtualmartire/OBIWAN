@@ -1,4 +1,4 @@
-"""Molecular dynamics with TensorFlow 2.11"""
+"""Molecular dynamics with TensorFlow 2.13"""
 
 import tensorflow as tf
 import numpy as np
@@ -43,11 +43,6 @@ class MolecularDynamics():
         self.settings = settings    
         tf.random.set_seed(self.settings.seed)
         self.setIntegrator()
-
-    # def enableStorePositionsAndPot(self, num_steps):
-    #     self.storePositionsAndPot = True
-    #     self.storePot = np.zeros(num_steps)
-    #     self.storePos = np.zeros((num_steps, self.na, self.system.dim))
 
     def integratorVV(self):
     
@@ -152,18 +147,11 @@ class MolecularDynamics():
         self.hvel = tf.zeros_like(self.pos)
         self.pos = self.centerSystem(self.system.coords)
 
-    # def cleanForce(self):
-    #     """Push to zero every force components."""
-    #     self.forces *= 0.
-
     def computeForcesAndEnergies(self):                       
         with tf.GradientTape(watch_accessed_variables=False) as force_tape:
             force_tape.watch(self.pos)
             self.E_nn = self.system.energy_tf(self.pos, self.box_sizes, self.types)
         self.forces = -force_tape.gradient(self.E_nn, self.pos)
-
-    # def energy(self):   
-    #     self.E_nn = self.system.energy_tf(self.pos, self.box_sizes, self.types)
 
     # minimize the current system through gradient ascent      
     def minimize(self, eta=1e-5, stop_criterion=['max_force', 1e-6], maxIt=100):
@@ -188,6 +176,7 @@ class MolecularDynamics():
                     _ = gc.collect()
 
                 it += 1
+            print(f"<<INFO>> Minimization: It {it} Potential value {self.E_nn} max force value {max_force}")
 
         else:
             raise ValueError("Stop criterion not implemented.")

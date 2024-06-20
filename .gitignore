@@ -10,5 +10,6 @@ data/datasets/comp6v2/*
 data/datasets/spice/*
 
 results/MD/outputs/*.xyz
+results/MD/outputs/*.forces
 
 !**/README.md

@@ -1,5 +1,3 @@
-"""Molecular dynamics with TensorFlow 2.11"""
-
 import tensorflow as tf
 import numpy as np
 from rdkit import Chem
