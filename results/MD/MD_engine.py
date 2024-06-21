@@ -94,6 +94,7 @@ class MolecularDynamics():
             self.XYZ_FILE = open(self.settings.xyzFileName, "w")
 
     def saveXYZFrame(self):
+        """Saving positions in Angstrom."""
         
         # transfer data to host mem 
         pos_host = self.pos_wrapped.numpy()
@@ -106,7 +107,6 @@ class MolecularDynamics():
                 type = self.typeDict[int(self.types[i])]
             else:
                 type = self.types[i].numpy().decode('utf-8')
-            # save positions in Angostrom
             self.XYZ_FILE.write(f"{type} {pos_host[i,0]*10.:.3f} {pos_host[i,1]*10.:.3f} {pos_host[i,2]*10.:.3f}\n")
 
     def closeXYZFile(self):
@@ -119,7 +119,7 @@ class MolecularDynamics():
             self.FORCES_FILE = open(self.settings.forcesFileName, "w")
 
     def saveForcesFrame(self):
-        """Saving in kcal/mol/A."""
+        """Saving forces in kcal/mol/A."""
         
         # transfer data to host mem 
         forces_host = self.forces.numpy()
