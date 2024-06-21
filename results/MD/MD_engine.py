@@ -119,9 +119,14 @@ class MolecularDynamics():
             self.FORCES_FILE = open(self.settings.forcesFileName, "w")
 
     def saveForcesFrame(self):
+        """Saving in kcal/mol/A."""
         
         # transfer data to host mem 
         forces_host = self.forces.numpy()
+        
+        # convert these Hartree/nm to kcal/mol/A
+        forces_host = forces_host/4.184         # Hartree to kcal/mol
+        forces_host = forces_host/10.           # nm to Angstrom
         
         # write
         self.FORCES_FILE.write(f"{self.na}\n")
@@ -131,7 +136,7 @@ class MolecularDynamics():
                 type = self.typeDict[int(self.types[i])]
             else:
                 type = self.types[i].numpy().decode('utf-8')
-            self.FORCES_FILE.write(f"{type} {forces_host[i,0]*10.:.3f} {forces_host[i,1]*10.:.3f} {forces_host[i,2]*10.:.3f}\n")
+            self.FORCES_FILE.write(f"{type} {forces_host[i,0]:.3f} {forces_host[i,1]:.3f} {forces_host[i,2]:.3f}\n")
 
     def closeForcesFile(self):
         self.FORCES_FILE.close()
