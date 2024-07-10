@@ -8,5 +8,5 @@ Together with the training routine and all the other scripts used to produce the
 
 ## Bibliography
 
-1- S. Martire, S. Decherchi, and A. Cavalli, _OBIWAN: An Element-Wise Scalable Feed-Forward Neural Network Potential_, Journal of Chemical Theory and Computation, 2024, DOI: 10.1021/acs.jctc.4c00342
-2- C. Devereux, J. Smith, K. K. Davis, K. Barros, R. Zubatyuk, O. Isayev, and A. E. Roitberg, _Extending the Applicability of the ANI Deep Learning Molecular Potential to Sulfur and Halogens_, Journal of Chemical Theory and Computation, 2020, DOI: 10.1021/acs.jctc.0c00121
+1. S. Martire, S. Decherchi, and A. Cavalli, _OBIWAN: An Element-Wise Scalable Feed-Forward Neural Network Potential_, Journal of Chemical Theory and Computation, 2024, DOI: 10.1021/acs.jctc.4c00342
+2. C. Devereux, J. Smith, K. K. Davis, K. Barros, R. Zubatyuk, O. Isayev, and A. E. Roitberg, _Extending the Applicability of the ANI Deep Learning Molecular Potential to Sulfur and Halogens_, Journal of Chemical Theory and Computation, 2020, DOI: 10.1021/acs.jctc.0c00121
