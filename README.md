@@ -1,6 +1,6 @@
 # 🧪 OBIWAN 🧪
 
-This is the code relative to the paper "OBIWAN: An Element-wise Scalable Feed-Forward Neural Network Potential" (LINK).
+This is the code relative to the paper "OBIWAN: An Element-wise Scalable Feed-Forward Neural Network Potential" - [link](https://doi.org/10.1021/acs.jctc.4c00342).
 
 Inspired by the effective ANAKIN method (1), we developed a feed-forward neural network potential whose architecture size doesn't scale with the number of considered species anymore, eventually allowing the user to re-utilise already learnt chemical knowledge without starting the training from scratch everytime.
 
