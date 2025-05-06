@@ -421,7 +421,7 @@ class Obiwan(tf.keras.Model):
 
       return Model(inputs, outputs, name="single_mlp")
 
-   def loadWeights(self, model_path, dynamic_mode):
+   def loadWeights(self, model_path, dynamic_mode = False):
 
       if dynamic_mode:
          self.build( [(None, None, 3), (None, None), (None, 3)] )
